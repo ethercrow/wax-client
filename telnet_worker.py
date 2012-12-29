@@ -4,6 +4,8 @@ import threading as T
 import messages as M
 
 import telnetlib
+import re
+from uiview_tree import UIViewTree
 
 class WorkerThread(T.Thread):
 
@@ -24,18 +26,11 @@ class WorkerThread(T.Thread):
         self.read_reply()
         self.conn.write("window = UIApplication:sharedApplication():keyWindow()\n")
         self.read_reply()
-        self.conn.write("window:recursiveDescription()\n")
-        s = self.read_reply()
-        self.gui_queue.put(M.GuiMessage(M.GuiMessage.HIERARCHY, s))
 
         while self.alive.isSet():
             try:
-                command = self.queue.get(True, 0.03)
-                print(command)
-                self.conn.write(command + "\n")
-                reply = self.read_reply()
-                msg = M.GuiMessage(M.GuiMessage.HIERARCHY, reply)
-                self.gui_queue.put(msg)
+                msg = self.queue.get(True, 0.03)
+                self.handle_message(msg)
             except Q.Empty:
                 pass
 
@@ -43,14 +38,18 @@ class WorkerThread(T.Thread):
         self.conn.close()
 
     def handle_message(self, msg):
-        assert(isinstance(msg, M.GuiMessage))
+        assert(isinstance(msg, M.CommMessage))
 
         if msg.kind == M.CommMessage.HIERARCHY:
-            self.conn.write("UIApplication:sharedApplication():keyWindow():recursiveDescription()\n")
-            s = self.read_reply()
-            self.gui_queue.put(M.GuiMessage(M.GuiMessage.HIERARCHY, s))
+            self.conn.write("window:recursiveDescription()\n")
+            hier = self.read_reply()
+            uitree = UIViewTree.from_recursive_description(hier)
+            # print('remember_command = ' + self.make_remember_views_command(uitree))
+            self.conn.write(self.make_remember_views_command(uitree))
+            self.read_reply()
+            self.gui_queue.put(M.GuiMessage(M.GuiMessage.HIERARCHY, uitree))
         elif msg.kind == M.CommMessage.PROPERTY:
-            self.gui_queue.put(M.GuiMessage(M.GuiMessage.PROPERTY, s))
+            pass
         else:
             assert(False)
 
@@ -60,8 +59,18 @@ class WorkerThread(T.Thread):
 
     def read_reply(self):
         index, match, text = self.conn.expect(['\n> $'], 0.2)
-        print(index, match, text)
         if not match:
-            print("Unexpected reply")
+            print("Unexpected reply {}".format(text))
             return None
         return text[:-3]
+
+    def make_remember_views_command(self, uitree):
+
+        def make_assignment(view):
+            ptr = view['pointer']
+            return 'v{} = {}'.format(ptr, ptr)
+
+        assignments = (make_assignment(view) for view in uitree.to_list())
+
+        result = '; '.join(assignments) + '\n'
+        return result

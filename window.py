@@ -36,7 +36,7 @@ class MainWindow(QDeclarativeView):
         assert(isinstance(msg, M.GuiMessage))
 
         if msg.kind == M.GuiMessage.HIERARCHY:
-            self.treeModel = TreeModel.from_text(msg.payload)
+            self.treeModel = TreeModel(msg.payload)
             self.rootContext().setContextProperty("treeModel", self.treeModel)
         elif msg.kind == M.GuiMessage.PROPERTY:
             self.currentViewProperties.update(msg.payload)
